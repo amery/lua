@@ -1,5 +1,5 @@
 /*
-** $Id: lua.c,v 1.192 2010/07/25 15:03:37 roberto Exp $
+** $Id: lua.c,v 1.203 2011/12/12 16:34:03 roberto Exp $
 ** Lua stand-alone interpreter
 ** See Copyright Notice in lua.h
 */
@@ -106,13 +106,11 @@ static void laction (int i) {
 
 
 static void print_usage (const char *badoption) {
-  if (badoption[1] == 'e' || badoption[1] == 'l') {
-    luai_writestringerror("%s: ", progname);
+  luai_writestringerror("%s: ", progname);
+  if (badoption[1] == 'e' || badoption[1] == 'l')
     luai_writestringerror("'%s' needs argument\n", badoption);
-  } else {
-    luai_writestringerror("%s: ", progname);
+  else
     luai_writestringerror("unrecognized option '%s'\n", badoption);
-  }
   luai_writestringerror(
   "usage: %s [options] [script [args]]\n"
   "Available options are:\n"
@@ -120,6 +118,7 @@ static void print_usage (const char *badoption) {
   "  -i       enter interactive mode after executing " LUA_QL("script") "\n"
   "  -l name  require library " LUA_QL("name") "\n"
   "  -v       show version information\n"
+  "  -E       ignore environment variables\n"
   "  --       stop handling options\n"
   "  -        stop handling options and execute stdin\n"
   ,
@@ -185,7 +184,8 @@ static int docall (lua_State *L, int narg, int nres) {
 
 
 static void print_version (void) {
-  printf("%s\n", LUA_COPYRIGHT);
+  luai_writestring(LUA_COPYRIGHT, strlen(LUA_COPYRIGHT));
+  luai_writeline();
 }
 
 
@@ -247,14 +247,14 @@ static const char *get_prompt (lua_State *L, int firstline) {
 }
 
 /* mark in error messages for incomplete statements */
-#define mark	"<eof>"
-#define marklen	(sizeof(mark) - 1)
+#define EOFMARK		"<eof>"
+#define marklen		(sizeof(EOFMARK)/sizeof(char) - 1)
 
 static int incomplete (lua_State *L, int status) {
   if (status == LUA_ERRSYNTAX) {
     size_t lmsg;
     const char *msg = lua_tolstring(L, -1, &lmsg);
-    if (lmsg >= marklen && strcmp(msg + lmsg - marklen, mark) == 0) {
+    if (lmsg >= marklen && strcmp(msg + lmsg - marklen, EOFMARK) == 0) {
       lua_pop(L, 1);
       return 1;
     }
@@ -322,7 +322,7 @@ static void dotty (lua_State *L) {
     }
   }
   lua_settop(L, 0);  /* clear stack */
-  luai_writestring("\n", 1);
+  luai_writeline();
   progname = oldprogname;
 }
 
@@ -349,7 +349,16 @@ static int handle_script (lua_State *L, char **argv, int n) {
 #define noextrachars(x)		{if ((x)[2] != '\0') return -1;}
 
 
-static int collectargs (char **argv, int *pi, int *pv, int *pe) {
+/* indices of various argument indicators in array args */
+#define has_i		0	/* -i */
+#define has_v		1	/* -v */
+#define has_e		2	/* -e */
+#define has_E		3	/* -E */
+
+#define num_has		4	/* number of 'has_*' */
+
+
+static int collectargs (char **argv, int *args) {
   int i;
   for (i = 1; argv[i] != NULL; i++) {
     if (argv[i][0] != '-')  /* not an option? */
@@ -360,19 +369,23 @@ static int collectargs (char **argv, int *pi, int *pv, int *pe) {
         return (argv[i+1] != NULL ? i+1 : 0);
       case '\0':
         return i;
+      case 'E':
+        args[has_E] = 1;
+        break;
       case 'i':
         noextrachars(argv[i]);
-        *pi = 1;  /* go through */
+        args[has_i] = 1;  /* go through */
       case 'v':
         noextrachars(argv[i]);
-        *pv = 1;
+        args[has_v] = 1;
         break;
       case 'e':
-        *pe = 1;  /* go through */
-      case 'l':
-        if (argv[i][2] == '\0') {
-          i++;
-          if (argv[i] == NULL) return -(i - 1);
+        args[has_e] = 1;  /* go through */
+      case 'l':  /* both options need an argument */
+        if (argv[i][2] == '\0') {  /* no concatenated argument? */
+          i++;  /* try next 'argv' */
+          if (argv[i] == NULL || argv[i][0] == '-')
+            return -(i - 1);  /* no next argument or it is another option */
         }
         break;
       default:  /* invalid option; return its index... */
@@ -427,31 +440,36 @@ static int handle_luainit (lua_State *L) {
 
 
 static int pmain (lua_State *L) {
-  int argc = lua_tointeger(L, 1);
+  int argc = (int)lua_tointeger(L, 1);
   char **argv = (char **)lua_touserdata(L, 2);
   int script;
-  int has_i = 0, has_v = 0, has_e = 0;
+  int args[num_has];
+  args[has_i] = args[has_v] = args[has_e] = args[has_E] = 0;
   if (argv[0] && argv[0][0]) progname = argv[0];
-  script = collectargs(argv, &has_i, &has_v, &has_e);
+  script = collectargs(argv, args);
   if (script < 0) {  /* invalid arg? */
     print_usage(argv[-script]);
     return 0;
   }
-  if (has_v) print_version();
+  if (args[has_v]) print_version();
+  if (args[has_E]) {  /* option '-E'? */
+    lua_pushboolean(L, 1);  /* signal for libraries to ignore env. vars. */
+    lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
+  }
   /* open standard libraries */
   luaL_checkversion(L);
   lua_gc(L, LUA_GCSTOP, 0);  /* stop collector during initialization */
   luaL_openlibs(L);  /* open libraries */
   lua_gc(L, LUA_GCRESTART, 0);
-  /* run LUA_INIT */
-  if (handle_luainit(L) != LUA_OK) return 0;
+  if (!args[has_E] && handle_luainit(L) != LUA_OK)
+    return 0;  /* error running LUA_INIT */
   /* execute arguments -e and -l */
   if (!runargs(L, argv, (script > 0) ? script : argc)) return 0;
   /* execute main script (if there is one) */
   if (script && handle_script(L, argv, script) != LUA_OK) return 0;
-  if (has_i)  /* -i option? */
+  if (args[has_i])  /* -i option? */
     dotty(L);
-  else if (script == 0 && !has_e && !has_v) {  /* no arguments? */
+  else if (script == 0 && !args[has_e] && !args[has_v]) {  /* no arguments? */
     if (lua_stdin_is_tty()) {
       print_version();
       dotty(L);

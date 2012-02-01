@@ -1,5 +1,5 @@
 /*
-** $Id: lualib.h,v 1.40 2010/06/10 21:29:47 roberto Exp $
+** $Id: lualib.h,v 1.43 2011/12/08 12:11:37 roberto Exp $
 ** Lua standard libraries
 ** See Copyright Notice in lua.h
 */
@@ -10,9 +10,6 @@
 
 #include "lua.h"
 
-
-/* Key to file-handle type */
-#define LUA_FILEHANDLE		"FILE*"
 
 
 LUAMOD_API int (luaopen_base) (lua_State *L);
@@ -32,8 +29,8 @@ LUAMOD_API int (luaopen_os) (lua_State *L);
 #define LUA_STRLIBNAME	"string"
 LUAMOD_API int (luaopen_string) (lua_State *L);
 
-#define LUA_BITLIBNAME	"bit"
-LUAMOD_API int (luaopen_bit) (lua_State *L);
+#define LUA_BITLIBNAME	"bit32"
+LUAMOD_API int (luaopen_bit32) (lua_State *L);
 
 #define LUA_MATHLIBNAME	"math"
 LUAMOD_API int (luaopen_math) (lua_State *L);
@@ -50,7 +47,7 @@ LUALIB_API void (luaL_openlibs) (lua_State *L);
 
 
 
-#ifndef lua_assert
+#if !defined(lua_assert)
 #define lua_assert(x)	((void)0)
 #endif
 

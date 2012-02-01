@@ -1,5 +1,5 @@
 /*
-** $Id: lopcodes.h,v 1.135 2010/03/12 19:14:06 roberto Exp $
+** $Id: lopcodes.h,v 1.142 2011/07/15 12:50:29 roberto Exp $
 ** Opcodes for Lua virtual machine
 ** See Copyright Notice in lua.h
 */
@@ -17,6 +17,7 @@
 	`A' : 8 bits
 	`B' : 9 bits
 	`C' : 9 bits
+	'Ax' : 26 bits ('A', 'B', and 'C' together)
 	`Bx' : 18 bits (`B' and `C' together)
 	`sBx' : signed Bx
 
@@ -122,7 +123,7 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 			| (cast(Instruction, bc)<<POS_Bx))
 
 #define CREATE_Ax(o,a)		((cast(Instruction, o)<<POS_OP) \
-			| (cast(Instruction, a)<<POS_A))
+			| (cast(Instruction, a)<<POS_Ax))
 
 
 /*
@@ -166,9 +167,10 @@ typedef enum {
 name		args	description
 ------------------------------------------------------------------------*/
 OP_MOVE,/*	A B	R(A) := R(B)					*/
-OP_LOADK,/*	A Bx	R(A) := Kst(Bx - 1)				*/
+OP_LOADK,/*	A Bx	R(A) := Kst(Bx)					*/
+OP_LOADKX,/*	A 	R(A) := Kst(extra arg)				*/
 OP_LOADBOOL,/*	A B C	R(A) := (Bool)B; if (C) pc++			*/
-OP_LOADNIL,/*	A B	R(A) := ... := R(B) := nil			*/
+OP_LOADNIL,/*	A B	R(A), R(A+1), ..., R(A+B) := nil		*/
 OP_GETUPVAL,/*	A B	R(A) := UpValue[B]				*/
 
 OP_GETTABUP,/*	A B C	R(A) := UpValue[B][RK(C)]			*/
@@ -194,8 +196,7 @@ OP_LEN,/*	A B	R(A) := length of R(B)				*/
 
 OP_CONCAT,/*	A B C	R(A) := R(B).. ... ..R(C)			*/
 
-OP_JMP,/*	sBx	pc+=sBx					*/
-
+OP_JMP,/*	A sBx	pc+=sBx; if (A) close all upvalues >= R(A) + 1	*/
 OP_EQ,/*	A B C	if ((RK(B) == RK(C)) ~= A) then pc++		*/
 OP_LT,/*	A B C	if ((RK(B) <  RK(C)) ~= A) then pc++		*/
 OP_LE,/*	A B C	if ((RK(B) <= RK(C)) ~= A) then pc++		*/
@@ -212,14 +213,13 @@ OP_FORLOOP,/*	A sBx	R(A)+=R(A+2);
 OP_FORPREP,/*	A sBx	R(A)-=R(A+2); pc+=sBx				*/
 
 OP_TFORCALL,/*	A C	R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));	*/
+OP_TFORLOOP,/*	A sBx	if R(A+1) ~= nil then { R(A)=R(A+1); pc += sBx }*/
+
 OP_SETLIST,/*	A B C	R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B	*/
 
-OP_CLOSE,/*	A	close all variables in the stack up to (>=) R(A)*/
 OP_CLOSURE,/*	A Bx	R(A) := closure(KPROTO[Bx])			*/
 
 OP_VARARG,/*	A B	R(A), R(A+1), ..., R(A+B-2) = vararg		*/
-
-OP_TFORLOOP,/*	A sBx	if R(A+1) ~= nil then { R(A)=R(A+1); pc += sBx }*/
 
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
 } OpCode;
@@ -243,7 +243,7 @@ OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
   (*) In OP_SETLIST, if (B == 0) then B = `top'; if (C == 0) then next
   'instruction' is EXTRAARG(real C).
 
-  (*) In OP_LOADK, if (Bx == 0) then next 'instruction' is EXTRAARG(real Bx).
+  (*) In OP_LOADKX, the next 'instruction' is always EXTRAARG.
 
   (*) For comparisons, A specifies what condition the test should accept
   (true or false).

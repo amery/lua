@@ -1,16 +1,16 @@
 /*
-** $Id: linit.c,v 1.28 2010/07/02 11:38:13 roberto Exp $
-** Initialization of libraries for lua.c and other clients        
+** $Id: linit.c,v 1.32 2011/04/08 19:17:36 roberto Exp $
+** Initialization of libraries for lua.c and other clients
 ** See Copyright Notice in lua.h
 */
 
 
-/*                                                           
+/*
 ** If you embed Lua in your program and need to open the standard
 ** libraries, call luaL_openlibs in your program. If you need a
 ** different set of libraries, copy this file to your project and edit
 ** it to suit your needs.
-*/                                                              
+*/
 
 
 #define linit_c
@@ -34,11 +34,9 @@ static const luaL_Reg loadedlibs[] = {
   {LUA_IOLIBNAME, luaopen_io},
   {LUA_OSLIBNAME, luaopen_os},
   {LUA_STRLIBNAME, luaopen_string},
-  {LUA_BITLIBNAME, luaopen_bit},
+  {LUA_BITLIBNAME, luaopen_bit32},
   {LUA_MATHLIBNAME, luaopen_math},
-#if defined(LUA_COMPAT_DEBUGLIB)
   {LUA_DBLIBNAME, luaopen_debug},
-#endif
   {NULL, NULL}
 };
 
@@ -47,7 +45,6 @@ static const luaL_Reg loadedlibs[] = {
 ** these libs are preloaded and must be required before used
 */
 static const luaL_Reg preloadedlibs[] = {
-  {LUA_DBLIBNAME, luaopen_debug},
   {NULL, NULL}
 };
 
@@ -60,7 +57,7 @@ LUALIB_API void luaL_openlibs (lua_State *L) {
     lua_pop(L, 1);  /* remove lib */
   }
   /* add open functions from 'preloadedlibs' into 'package.preload' table */
-  luaL_findtable(L, LUA_REGISTRYINDEX, "_PRELOAD");
+  luaL_getsubtable(L, LUA_REGISTRYINDEX, "_PRELOAD");
   for (lib = preloadedlibs; lib->func; lib++) {
     lua_pushcfunction(L, lib->func);
     lua_setfield(L, -2, lib->name);

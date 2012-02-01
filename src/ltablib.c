@@ -1,5 +1,5 @@
 /*
-** $Id: ltablib.c,v 1.56 2010/07/02 11:38:13 roberto Exp $
+** $Id: ltablib.c,v 1.63 2011/11/28 17:26:30 roberto Exp $
 ** Library for Table Manipulation
 ** See Copyright Notice in lua.h
 */
@@ -16,51 +16,8 @@
 #include "lualib.h"
 
 
-#define aux_getn(L,n)	(luaL_checktype(L, n, LUA_TTABLE), lua_rawlen(L, n))
-
-
-static int foreachi (lua_State *L) {
-  int n = aux_getn(L, 1);
-  int i;
-  if (lua_getctx(L, &i) == LUA_YIELD) goto poscall;
-  luaL_checktype(L, 2, LUA_TFUNCTION);
-  for (i = 1; i <= n; i++) {
-    lua_pushvalue(L, 2);  /* function */
-    lua_pushinteger(L, i);  /* 1st argument */
-    lua_rawgeti(L, 1, i);  /* 2nd argument */
-    lua_callk(L, 2, 1, i, foreachi);
-    poscall:
-    if (!lua_isnil(L, -1))
-      return 1;
-    lua_pop(L, 1);  /* remove nil result */
-  }
-  return 0;
-}
-
-
-static int foreachcont (lua_State *L) {
-  for (;;) {
-    if (!lua_isnil(L, -1))
-      return 1;
-    lua_pop(L, 2);  /* remove value and result */
-    if (lua_next(L, 1) == 0)  /* no more elements? */
-      return 0;
-    lua_pushvalue(L, 2);  /* function */
-    lua_pushvalue(L, -3);  /* key */
-    lua_pushvalue(L, -3);  /* value */
-    lua_callk(L, 2, 1, 0, foreachcont);
-  }
-}
-
-
-static int foreach (lua_State *L) {
-  luaL_checktype(L, 1, LUA_TTABLE);
-  luaL_checktype(L, 2, LUA_TFUNCTION);
-  lua_pushnil(L);  /* first key */
-  lua_pushnil(L);  /* first value */
-  lua_pushnil(L);  /* first "return" */
-  return foreachcont(L);
-}
+#define aux_getn(L,n)  \
+	(luaL_checktype(L, n, LUA_TTABLE), luaL_len(L, n))
 
 
 #if defined(LUA_COMPAT_MAXN)
@@ -78,16 +35,7 @@ static int maxn (lua_State *L) {
   lua_pushnumber(L, max);
   return 1;
 }
-#else
-static int maxn (lua_State *L) {
-  return luaL_error(L, "function 'maxn' is deprecated");
-}
 #endif
-
-static int getn (lua_State *L) {
-  lua_pushinteger(L, aux_getn(L, 1));
-  return 1;
-}
 
 
 static int tinsert (lua_State *L) {
@@ -138,7 +86,7 @@ static void addfield (lua_State *L, luaL_Buffer *b, int i) {
   if (!lua_isstring(L, -1))
     luaL_error(L, "invalid value (%s) at index %d in table for "
                   LUA_QL("concat"), luaL_typename(L, -1), i);
-    luaL_addvalue(b);
+  luaL_addvalue(b);
 }
 
 
@@ -149,7 +97,7 @@ static int tconcat (lua_State *L) {
   const char *sep = luaL_optlstring(L, 2, "", &lsep);
   luaL_checktype(L, 1, LUA_TTABLE);
   i = luaL_optint(L, 3, 1);
-  last = luaL_opt(L, luaL_checkint, 4, (int)lua_rawlen(L, 1));
+  last = luaL_opt(L, luaL_checkint, 4, luaL_len(L, 1));
   luaL_buffinit(L, &b);
   for (; i < last; i++) {
     addfield(L, &b, i);
@@ -169,18 +117,19 @@ static int tconcat (lua_State *L) {
 */
 
 static int pack (lua_State *L) {
-  int top = lua_gettop(L);
-  lua_createtable(L, top, 1);  /* create result table */
-  lua_pushinteger(L, top);  /* number of elements */
+  int n = lua_gettop(L);  /* number of elements to pack */
+  lua_createtable(L, n, 1);  /* create result table */
+  lua_pushinteger(L, n);
   lua_setfield(L, -2, "n");  /* t.n = number of elements */
-  if (top > 0) {  /* at least one element? */
+  if (n > 0) {  /* at least one element? */
+    int i;
     lua_pushvalue(L, 1);
     lua_rawseti(L, -2, 1);  /* insert first element */
-    lua_replace(L, 1);  /* move table into its position (index 1) */
-    for (; top >= 2; top--)  /* assign other elements */
-      lua_rawseti(L, 1, top);
+    lua_replace(L, 1);  /* move table into index 1 */
+    for (i = n; i >= 2; i--)  /* assign other elements */
+      lua_rawseti(L, 1, i);
   }
-  return 1;
+  return 1;  /* return table */
 }
 
 
@@ -188,7 +137,7 @@ static int unpack (lua_State *L) {
   int i, e, n;
   luaL_checktype(L, 1, LUA_TTABLE);
   i = luaL_optint(L, 2, 1);
-  e = luaL_opt(L, luaL_checkint, 3, (int)lua_rawlen(L, 1));
+  e = luaL_opt(L, luaL_checkint, 3, luaL_len(L, 1));
   if (i > e) return 0;  /* empty range */
   n = e - i + 1;  /* number of elements */
   if (n <= 0 || !lua_checkstack(L, n))  /* n <= 0 means arith. overflow */
@@ -310,10 +259,9 @@ static int sort (lua_State *L) {
 
 static const luaL_Reg tab_funcs[] = {
   {"concat", tconcat},
-  {"foreach", foreach},
-  {"foreachi", foreachi},
-  {"getn", getn},
+#if defined(LUA_COMPAT_MAXN)
   {"maxn", maxn},
+#endif
   {"insert", tinsert},
   {"pack", pack},
   {"unpack", unpack},

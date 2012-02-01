@@ -1,5 +1,5 @@
 /*
-** $Id: ldblib.c,v 1.124 2010/07/25 15:18:19 roberto Exp $
+** $Id: ldblib.c,v 1.131 2011/10/24 14:54:05 roberto Exp $
 ** Interface from Lua to its debug API
 ** See Copyright Notice in lua.h
 */
@@ -16,6 +16,9 @@
 
 #include "lauxlib.h"
 #include "lualib.h"
+
+
+#define HOOKKEY		"_HKEY"
 
 
 
@@ -39,19 +42,23 @@ static int db_setmetatable (lua_State *L) {
   luaL_argcheck(L, t == LUA_TNIL || t == LUA_TTABLE, 2,
                     "nil or table expected");
   lua_settop(L, 2);
-  lua_pushboolean(L, lua_setmetatable(L, 1));
-  return 1;
+  lua_setmetatable(L, 1);
+  return 1;  /* return 1st argument */
 }
 
 
 static int db_getuservalue (lua_State *L) {
-  luaL_checktype(L, 1, LUA_TUSERDATA);
-  lua_getuservalue(L, 1);
+  if (lua_type(L, 1) != LUA_TUSERDATA)
+    lua_pushnil(L);
+  else
+    lua_getuservalue(L, 1);
   return 1;
 }
 
 
 static int db_setuservalue (lua_State *L) {
+  if (lua_type(L, 1) == LUA_TLIGHTUSERDATA)
+    luaL_argerror(L, 1, "full userdata expected, got light userdata");
   luaL_checktype(L, 1, LUA_TUSERDATA);
   if (!lua_isnoneornil(L, 2))
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -246,16 +253,14 @@ static int db_upvaluejoin (lua_State *L) {
 }
 
 
-static const char KEY_HOOK = 'h';
+#define gethooktable(L)	luaL_getsubtable(L, LUA_REGISTRYINDEX, HOOKKEY);
 
 
 static void hookf (lua_State *L, lua_Debug *ar) {
   static const char *const hooknames[] =
     {"call", "return", "line", "count", "tail call"};
-  lua_pushlightuserdata(L, (void *)&KEY_HOOK);
-  lua_rawget(L, LUA_REGISTRYINDEX);
-  lua_pushlightuserdata(L, L);
-  lua_rawget(L, -2);
+  gethooktable(L);
+  lua_rawgetp(L, -1, L);
   if (lua_isfunction(L, -1)) {
     lua_pushstring(L, hooknames[(int)ar->event]);
     if (ar->currentline >= 0)
@@ -287,19 +292,6 @@ static char *unmakemask (int mask, char *smask) {
 }
 
 
-static void gethooktable (lua_State *L) {
-  lua_pushlightuserdata(L, (void *)&KEY_HOOK);
-  lua_rawget(L, LUA_REGISTRYINDEX);
-  if (!lua_istable(L, -1)) {
-    lua_pop(L, 1);
-    lua_createtable(L, 0, 1);
-    lua_pushlightuserdata(L, (void *)&KEY_HOOK);
-    lua_pushvalue(L, -2);
-    lua_rawset(L, LUA_REGISTRYINDEX);
-  }
-}
-
-
 static int db_sethook (lua_State *L) {
   int arg, mask, count;
   lua_Hook func;
@@ -315,9 +307,8 @@ static int db_sethook (lua_State *L) {
     func = hookf; mask = makemask(smask, count);
   }
   gethooktable(L);
-  lua_pushlightuserdata(L, L1);
   lua_pushvalue(L, arg+1);
-  lua_rawset(L, -3);  /* set new hook */
+  lua_rawsetp(L, -2, L1);  /* set new hook */
   lua_pop(L, 1);  /* remove hook table */
   lua_sethook(L1, func, mask, count);  /* set hooks */
   return 0;
@@ -334,8 +325,7 @@ static int db_gethook (lua_State *L) {
     lua_pushliteral(L, "external hook");
   else {
     gethooktable(L);
-    lua_pushlightuserdata(L, L1);
-    lua_rawget(L, -2);   /* get hook */
+    lua_rawgetp(L, -1, L1);   /* get hook */
     lua_remove(L, -2);  /* remove hook table */
   }
   lua_pushstring(L, unmakemask(mask, buff));
